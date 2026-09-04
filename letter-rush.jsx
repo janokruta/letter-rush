@@ -618,6 +618,17 @@ export default function NaLitere() {
         .sheet .acts{display:flex; gap:10px; margin-top:22px;}
         .sheet .acts .big{flex:1; font-size:16px; padding:15px;}
         @media (prefers-reduced-motion:no-preference){ .sheet{animation:pop .2s cubic-bezier(.2,1.2,.4,1);} }
+
+        /* Desktop: zamiast pełnego ekranu — wyśrodkowana "ramka telefonu".
+           .lr-root jest position:fixed z inset:0, więc max-width/height + margin:auto
+           centruje ją w obu osiach, a rozlany box-shadow maluje tło dookoła. */
+        @media (min-width:600px){
+          .lr-root{
+            max-width:460px; max-height:min(920px, 100vh);
+            margin:auto; border-radius:28px;
+            box-shadow:0 30px 90px -24px rgba(0,0,0,.7), 0 0 0 100vmax var(--edge-plum);
+          }
+        }
       `}</style>
 
       {/* ---------------- USTAWIENIA ---------------- */}
