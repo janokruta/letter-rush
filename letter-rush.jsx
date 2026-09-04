@@ -118,6 +118,18 @@ const shuffle = (arr) => {
   return a;
 };
 
+// Klawiatura: składamy polskie znaki do liter z ALFABETU (Ł→L, Ś→S, Ż→Z itd.).
+// Ł nie rozkłada się przez NFD, więc podmieniamy je ręcznie przed normalizacją.
+const keyToLetter = (key) => {
+  if (key.length !== 1) return null;
+  const folded = key
+    .toUpperCase()
+    .replace(/Ł/g, "L")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+  return ALPHABET.includes(folded) ? folded : null;
+};
+
 const nextInPlay = (list, from) => {
   for (let i = 1; i <= list.length; i++) {
     const idx = (from + i) % list.length;
@@ -174,6 +186,13 @@ export default function NaLitere() {
   const [winner, setWinner] = useState(null);
   const [confirmSkip, setConfirmSkip] = useState(false);
 
+  // Desktop = klawiatura pod ręką (kursor precyzyjny + hover). Na dotyku zostaje stara podpowiedź.
+  const [isDesktop] = useState(
+    () => typeof window !== "undefined" &&
+      !!window.matchMedia &&
+      window.matchMedia("(hover: hover) and (pointer: fine)").matches
+  );
+
   const deck = useRef([]);
   const turnId = useRef(0);
   const locked = useRef(false);
@@ -221,6 +240,21 @@ export default function NaLitere() {
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, turnId.current, confirmSkip]);
+
+  /* ---- klawiatura: litera na klawiszu = dotknięcie kafelka ---- */
+  useEffect(() => {
+    if (phase !== "live" || confirmSkip) return;
+    const onKey = (e) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+      const L = keyToLetter(e.key);
+      if (!L) return;
+      e.preventDefault();
+      claim(L);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, confirmSkip, taken]);
 
   /* ---- ekran nie gaśnie w trakcie gry ---- */
   const playing = phase !== "setup" && phase !== "over";
@@ -815,7 +849,11 @@ export default function NaLitere() {
                   </span>
                 </div>
                 {firstTurn && (
-                  <div className={"hint" + (panic ? " hot" : "")}>Powiedz słowo i dotknij jego litery</div>
+                  <div className={"hint" + (panic ? " hot" : "")}>
+                    {isDesktop
+                      ? "Powiedz słowo i dotknij litery lub naciśnij klawisz"
+                      : "Powiedz słowo i dotknij jego litery"}
+                  </div>
                 )}
                 <div className="grid">
                   {ALPHABET.map((L) => (
