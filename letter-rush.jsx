@@ -60,6 +60,10 @@ const BULBS = 20;
 
 function useSound(enabled) {
   const ctxRef = useRef(null);
+  // Zawsze aktualny stan wyciszenia — dzięki temu nawet "stare" domknięcia
+  // (np. działający już interwał zegara) widzą wyciszenie w locie.
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
 
   const ctx = useCallback(() => {
     if (typeof window === "undefined") return null;
@@ -72,7 +76,7 @@ function useSound(enabled) {
 
   const tone = useCallback(
     (freq, dur, type = "square", vol = 0.15, slideTo = null) => {
-      if (!enabled) return;
+      if (!enabledRef.current) return;
       const c = ctx();
       if (!c) return;
       const osc = c.createOscillator();
@@ -86,7 +90,7 @@ function useSound(enabled) {
       osc.start();
       osc.stop(c.currentTime + dur + 0.02);
     },
-    [ctx, enabled]
+    [ctx]
   );
 
   return {
@@ -123,6 +127,28 @@ const nextInPlay = (list, from) => {
 };
 
 /* ------------------------------------------------------------------ */
+/*  Ikony (Material Design, inline SVG — dziedziczą currentColor)      */
+/* ------------------------------------------------------------------ */
+
+const VolumeOnIcon = () => (
+  <svg viewBox="0 0 24 24" width="21" height="21" fill="currentColor" aria-hidden="true">
+    <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05A4.5 4.5 0 0 0 16.5 12zM14 3.23v2.06a6.99 6.99 0 0 1 0 13.42v2.06a9 9 0 0 0 0-17.54z" />
+  </svg>
+);
+
+const VolumeOffIcon = () => (
+  <svg viewBox="0 0 24 24" width="21" height="21" fill="currentColor" aria-hidden="true">
+    <path d="M4.34 2.93 2.93 4.34 7.29 8.7 7 9H3v6h4l5 5v-6.59l4.18 4.18c-.65.49-1.38.88-2.18 1.11v2.06a8.9 8.9 0 0 0 3.61-1.75l2.05 2.05 1.41-1.41L4.34 2.93zM19 12c0 .82-.15 1.61-.41 2.34l1.53 1.53A8.9 8.9 0 0 0 21 12a9 9 0 0 0-7-8.77v2.06A6.99 6.99 0 0 1 19 12zm-2.5 0A4.5 4.5 0 0 0 14 7.97v1.79l2.48 2.48c.01-.08.02-.16.02-.24zM12 4 9.91 6.09 12 8.18V4z" />
+  </svg>
+);
+
+const CloseIcon = () => (
+  <svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor" aria-hidden="true">
+    <path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+  </svg>
+);
+
+/* ------------------------------------------------------------------ */
 /*  Gra                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -146,11 +172,13 @@ export default function NaLitere() {
   const [result, setResult] = useState(null);
   const [banner, setBanner] = useState(null);
   const [winner, setWinner] = useState(null);
+  const [confirmSkip, setConfirmSkip] = useState(false);
 
   const deck = useRef([]);
   const turnId = useRef(0);
   const locked = useRef(false);
   const wakeLock = useRef(null);
+  const pausedLeft = useRef(null); // zamrożony czas, gdy otwarte jest okno potwierdzenia
 
   const sfx = useSound(soundOn);
   const openCount = ALPHABET.length - Object.keys(taken).length;
@@ -164,11 +192,14 @@ export default function NaLitere() {
 
   /* ---- zegar: chodzi tylko wtedy, gdy plansza jest żywa ---- */
   useEffect(() => {
-    if (phase !== "live") return;
+    if (phase !== "live" || confirmSkip) return;
     const total = limit * 1000;
-    const deadline = Date.now() + total;
-    let lastBeep = Math.ceil(limit);
-    setLeft(total);
+    // wznawiając po pauzie, startujemy od zamrożonego czasu, a nie od pełnej puli
+    const startMs = pausedLeft.current != null ? pausedLeft.current : total;
+    pausedLeft.current = null;
+    const deadline = Date.now() + startMs;
+    let lastBeep = Math.ceil(startMs / 1000);
+    setLeft(startMs);
 
     const id = setInterval(() => {
       const ms = deadline - Date.now();
@@ -189,7 +220,7 @@ export default function NaLitere() {
 
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, turnId.current]);
+  }, [phase, turnId.current, confirmSkip]);
 
   /* ---- ekran nie gaśnie w trakcie gry ---- */
   const playing = phase !== "setup" && phase !== "over";
@@ -345,9 +376,22 @@ export default function NaLitere() {
     resolve(letter);
   }
 
+  function askSkip() {
+    if (phase !== "live") return;
+    pausedLeft.current = left; // zamroź pozostały czas na czas decyzji
+    setConfirmSkip(true);
+  }
+
+  function cancelSkip() {
+    setConfirmSkip(false); // wznów turę z zamrożonym czasem
+  }
+
   function skipCategory() {
+    // potwierdzone: świeże hasło i pełny czas dla tej samej tury; plansza zostaje
+    pausedLeft.current = null;
+    setConfirmSkip(false);
     setCategory(drawCategory());
-    setTaken({});
+    turnId.current += 1;
   }
 
   const litBulbs = Math.ceil((left / (limit * 1000)) * BULBS);
@@ -378,7 +422,8 @@ export default function NaLitere() {
           overflow:hidden;
         }
         .lr-root *{box-sizing:border-box; margin:0; padding:0;}
-        .lr-root button{font-family:inherit; border:0; background:none; color:inherit; cursor:pointer;}
+        /* :where() keeps the reset at (0,0,1) so component backgrounds (.big, .tile, .seg…) win */
+        :where(.lr-root) button{font-family:inherit; border:0; background:none; color:inherit; cursor:pointer;}
         .lr-root :focus-visible{outline:3px solid var(--marigold); outline-offset:3px;}
 
         .bar{display:flex; align-items:center; gap:8px; padding:14px 16px 10px;}
@@ -529,6 +574,16 @@ export default function NaLitere() {
         .row.silver .rank{background:var(--paper); color:var(--plum); opacity:.85;}
         .foot{padding:14px 16px calc(16px + env(safe-area-inset-bottom));
               background:linear-gradient(180deg, rgba(30,16,54,0) 0%, var(--plum) 42%);}
+
+        .modal{position:absolute; inset:0; z-index:30; display:grid; place-items:center; padding:26px;
+               background:rgba(15,8,28,.74); -webkit-backdrop-filter:blur(3px); backdrop-filter:blur(3px);}
+        .sheet{width:100%; max-width:330px; background:var(--plum-2); border-radius:20px; padding:24px 22px;
+               text-align:center; box-shadow:var(--lift);}
+        .sheet h3{font-family:var(--display); font-size:22px; text-transform:uppercase; color:var(--marigold); line-height:1.05;}
+        .sheet p{font-size:13.5px; opacity:.72; margin-top:11px; line-height:1.5;}
+        .sheet .acts{display:flex; gap:10px; margin-top:22px;}
+        .sheet .acts .big{flex:1; font-size:16px; padding:15px;}
+        @media (prefers-reduced-motion:no-preference){ .sheet{animation:pop .2s cubic-bezier(.2,1.2,.4,1);} }
       `}</style>
 
       {/* ---------------- USTAWIENIA ---------------- */}
@@ -693,10 +748,17 @@ export default function NaLitere() {
             {mode === "kids" && <span className="mode-pill kids">Dzieci 7+</span>}
             {mode === "adult" && <span className="mode-pill adult">18+</span>}
             <div className="chip">
-              <button className="icon" aria-label="Dźwięk" onClick={() => setSoundOn((s) => !s)}>
-                {soundOn ? "🔊" : "🔇"}
+              <button
+                className="icon"
+                aria-label={soundOn ? "Wyłącz dźwięk" : "Włącz dźwięk"}
+                aria-pressed={!soundOn}
+                onClick={() => setSoundOn((s) => !s)}
+              >
+                {soundOn ? <VolumeOnIcon /> : <VolumeOffIcon />}
               </button>
-              <button className="icon" aria-label="Zakończ grę" onClick={() => setPhase("setup")}>✕</button>
+              <button className="icon" aria-label="Zakończ grę" onClick={() => setPhase("setup")}>
+                <CloseIcon />
+              </button>
             </div>
           </div>
 
@@ -775,7 +837,7 @@ export default function NaLitere() {
             {phase === "ready" ? (
               <button className="big" onClick={goLive}>Start</button>
             ) : (
-              <button className="big ghost" onClick={skipCategory} disabled style={{ opacity: 0.35 }}>
+              <button className="big ghost" onClick={askSkip} disabled={phase !== "live"}>
                 Nowa kategoria
               </button>
             )}
@@ -788,6 +850,19 @@ export default function NaLitere() {
                 <p>{result.name}{result.letter ? ` · ${result.letter}` : ""}</p>
                 {result.skipped && <p>pauza do końca rundy</p>}
                 {result.next && <p className="up">Teraz — {result.next}</p>}
+              </div>
+            </div>
+          )}
+
+          {confirmSkip && (
+            <div className="modal" onClick={cancelSkip}>
+              <div className="sheet" onClick={(e) => e.stopPropagation()}>
+                <h3>Nowa kategoria?</h3>
+                <p>Wylosujemy inne hasło, a zegar ruszy od nowa. Zajęte litery zostają.</p>
+                <div className="acts">
+                  <button className="big ghost" onClick={cancelSkip}>Anuluj</button>
+                  <button className="big" onClick={skipCategory}>Losuj</button>
+                </div>
               </div>
             </div>
           )}
