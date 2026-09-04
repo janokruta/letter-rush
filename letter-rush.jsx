@@ -595,8 +595,8 @@ export default function NaLitere() {
               <em>Literę</em>
             </div>
             <p className="tag">
-              Podajcie telefon dalej. Zegar rusza od razu — powiedz słowo z kategorii i dotknij litery,
-              na którą się zaczyna.
+              Podaj telefon dalej i myśl szybko! Kategoria na ekranie, zegar leci. Powiedz słowo
+              i złap jego pierwszą literę, nim skończy się czas.
             </p>
 
             <div className="field">
